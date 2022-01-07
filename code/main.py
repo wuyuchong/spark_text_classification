@@ -7,11 +7,15 @@ import pyspark.ml.feature
 from pyspark.ml import Pipeline
 from pyspark.ml.feature import Tokenizer,StopWordsRemover,CountVectorizer,IDF
 from pyspark.ml.feature import StringIndexer
-from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.tuning import CrossValidator,ParamGridBuilder
 from pyspark.sql.types import StringType
+from pyspark.sql.functions import udf, col
 
+import gensim.parsing.preprocessing as gsp
+from pyspark.sql.types import StringType
+from gensim import utils
 
 # ----------------------------> 数据读取
 spark = SparkSession.builder.appName('text_classification').getOrCreate()
@@ -31,6 +35,24 @@ df.groupBy('sentiment').count().show()
 
 
 # ----------------------------> 文本清洁
+filters = [
+    gsp.strip_tags,
+    gsp.strip_punctuation,
+    gsp.strip_multiple_whitespaces,
+    gsp.strip_numeric,
+    gsp.remove_stopwords,
+    gsp.strip_short,
+    gsp.stem_text
+]
+def clean_text(x):
+    x = x.lower()
+    x = utils.to_unicode(x)
+    for f in filters:
+        x = f(x)
+    return x
+
+cleanTextUDF = udf(lambda x: clean_text(x), StringType())
+df = df.withColumn("clean_text", cleanTextUDF(col("review")))
 # ----------------------------------------------------------------------
 
 
@@ -46,8 +68,8 @@ df = labelEncoder.transform(df)
 # ----------------------------------------------------------------------
 
 
-# ----------------------------> 文本特征化
-tokenizer = Tokenizer(inputCol='review', outputCol='tokens')
+# ----------------------------> 文本特征工程
+tokenizer = Tokenizer(inputCol='clean_text', outputCol='tokens')
 add_stopwords = ["<br />","amp"]
 stopwords_remover = StopWordsRemover(inputCol='tokens', outputCol='filtered_tokens').setStopWords(add_stopwords)
 vectorizer = CountVectorizer(inputCol='filtered_tokens', outputCol='rawFeatures')
@@ -74,13 +96,13 @@ accuracy
 
 # ----------------------------> 预测
 inputText = spark.createDataFrame([("I like this movie",StringType()),
-                                   ("Back of Beyond",StringType())],
-                                  ["review"])
+                                   ("It is so bad",StringType())],
+                                  ["clean_text"])
 inputText.show(truncate=False)
 inputText = preprocessModel.transform(inputText)
 inputPrediction = lr_model.transform(inputText)
 inputPrediction.show()
-inputPrediction.select(['review', 'prediction']).show()
+inputPrediction.select(['clean_text', 'prediction']).show()
 # ----------------------------------------------------------------------
 
 
@@ -100,9 +122,32 @@ def logisticCV(trainDF, testDF):
                                     numFolds=5)
     cv = crossValidator.fit(trainDF)
     best_model = cv.bestModel.stages[0]
-    prediction = best_model.transform(test_df)
+    prediction = best_model.transform(testDF)
     accuracy = evaluator.evaluate(predictions)
     print('Accuracy in Cross Validation of logistic regression: %g' % accuracy)
 
 logisticCV(trainDF, testDF)
 
+
+def RandomForestCV(trainDF, testDF):
+    rf = RandomForestClassifier(featuresCol='vectorizedFeatures',labelCol='label')
+    pipeline = Pipeline(stages=[rf])
+    paramGrid = ParamGridBuilder() \
+        .addGrid(rf.maxDepth, [5, 10]) \
+        .addGrid(rf.maxBins, [25, 31]) \
+        .addGrid(rf.minInfoGain, [0.01, 0.001]) \
+        .addGrid(rf.numTrees, [20, 60]) \
+        .addGrid(rf.impurity, ['gini', 'entropy']) \
+        .build() 
+    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
+    crossValidator = CrossValidator(estimator=pipeline, 
+                                    evaluator=evaluator,
+                                    estimatorParamMaps=paramGrid,
+                                    numFolds=5)
+    cv = crossValidator.fit(trainDF)
+    best_model = cv.bestModel.stages[0]
+    prediction = best_model.transform(testDF)
+    accuracy = evaluator.evaluate(predictions)
+    print('Accuracy in Cross Validation of random forest: %g' % accuracy)
+
+RandomForestCV(trainDF, testDF)
