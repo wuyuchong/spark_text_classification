@@ -130,7 +130,7 @@ def logisticCV(trainDF, testDF):
                                     numFolds=5)
     cv = crossValidator.fit(trainDF)
     best_model = cv.bestModel.stages[0]
-    prediction = best_model.transform(testDF)
+    predictions = best_model.transform(testDF)
     accuracy = evaluator.evaluate(predictions)
     print('Accuracy in Cross Validation of logistic regression: %g' % accuracy)
 
@@ -154,7 +154,7 @@ def RandomForestCV(trainDF, testDF):
                                     numFolds=5)
     cv = crossValidator.fit(trainDF)
     best_model = cv.bestModel.stages[0]
-    prediction = best_model.transform(testDF)
+    predictions = best_model.transform(testDF)
     accuracy = evaluator.evaluate(predictions)
     print('Accuracy in Cross Validation of random forest: %g' % accuracy)
 
