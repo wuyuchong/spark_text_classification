@@ -2,20 +2,15 @@
 # -*- coding: utf-8 -*-
 
 import pandas as pd
-from pyspark.sql import SparkSession,Row
 import pyspark.ml.feature
 from pyspark.ml import Pipeline
-from pyspark.ml.feature import Tokenizer,StopWordsRemover,CountVectorizer,IDF
-from pyspark.ml.feature import StringIndexer
-from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
-from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.tuning import CrossValidator,ParamGridBuilder
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+from pyspark.ml.feature import Tokenizer,StopWordsRemover,CountVectorizer,IDF,StringIndexer,Word2Vec
+from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
+from pyspark.sql import SparkSession,Row
 from pyspark.sql.types import StringType
 from pyspark.sql.functions import udf, col
-
-import gensim.parsing.preprocessing as gsp
-from pyspark.sql.types import StringType
-from gensim import utils
 
 # ----------------------------> 数据读取
 spark = SparkSession.builder.appName('text_classification').getOrCreate()
@@ -39,24 +34,31 @@ df.groupBy('sentiment').count().show()
 
 
 # ----------------------------> 文本清洁
-filters = [
-    gsp.strip_tags,
-    gsp.strip_punctuation,
-    gsp.strip_multiple_whitespaces,
-    gsp.strip_numeric,
-    gsp.remove_stopwords,
-    gsp.strip_short,
-    gsp.stem_text
-]
-def clean_text(x):
-    x = x.lower()
-    x = utils.to_unicode(x)
-    for f in filters:
-        x = f(x)
-    return x
+try:
+    # 在服务器上的分布式模式中，需要使用 --py-files 将 gensim 包传到每个子节点
+    # 若该过程失败则跳过文本清洁过程
+    import gensim.parsing.preprocessing as gsp
+    from gensim import utils
+    filters = [
+        gsp.strip_tags,
+        gsp.strip_punctuation,
+        gsp.strip_multiple_whitespaces,
+        gsp.strip_numeric,
+        gsp.remove_stopwords,
+        gsp.strip_short,
+        gsp.stem_text
+    ]
+    def clean_text(x):
+        x = x.lower()
+        x = utils.to_unicode(x)
+        for f in filters:
+            x = f(x)
+        return x
 
-cleanTextUDF = udf(lambda x: clean_text(x), StringType())
-df = df.withColumn("clean_text", cleanTextUDF(col("review")))
+    cleanTextUDF = udf(lambda x: clean_text(x), StringType())
+    df = df.withColumn("clean_text", cleanTextUDF(col("review")))
+except:
+    df = df.withColumn("clean_text", df.review)
 # ----------------------------------------------------------------------
 
 
@@ -79,7 +81,9 @@ stopwords_remover = StopWordsRemover(inputCol='tokens', outputCol='filtered_toke
 vectorizer = CountVectorizer(inputCol='filtered_tokens', outputCol='rawFeatures')
 # or use hashingTF = HashingTF(inputCol="tokens", outputCol="rawFeatures")
 idf = IDF(inputCol='rawFeatures', outputCol='vectorizedFeatures')
-pipeline = Pipeline(stages=[tokenizer,stopwords_remover,vectorizer,idf])
+word2Vec = Word2Vec(vectorSize=5, minCount=2, inputCol="filtered_tokens", outputCol="vectorizedFeatures")
+#  pipeline = Pipeline(stages=[tokenizer,stopwords_remover,vectorizer,idf])
+pipeline = Pipeline(stages=[tokenizer,stopwords_remover,word2Vec])
 preprocessModel = pipeline.fit(trainDF)
 trainDF = preprocessModel.transform(trainDF)
 testDF = preprocessModel.transform(testDF)
@@ -155,3 +159,8 @@ def RandomForestCV(trainDF, testDF):
     print('Accuracy in Cross Validation of random forest: %g' % accuracy)
 
 RandomForestCV(trainDF, testDF)
+
+
+
+
+# https://spark.apache.org/docs/latest/api/python/user_guide/python_packaging.html
