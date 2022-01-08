@@ -19,7 +19,11 @@ from gensim import utils
 
 # ----------------------------> 数据读取
 spark = SparkSession.builder.appName('text_classification').getOrCreate()
-df = spark.read.csv('../data/IMDB.csv', header = True, inferSchema = True)
+try:
+    df = spark.read.csv('../data/IMDB.csv', header = True, inferSchema = True)
+except:
+    # location on server
+    df = spark.read.csv('file:///home1/cufe/students/wuyuchong/spark_text_classification/data/IMDB.csv', header = True, inferSchema = True)
 df.printSchema()
 df.show()
 
