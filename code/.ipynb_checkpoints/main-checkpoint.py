@@ -1,14 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# ----------------------------> 特征工程方法选项
-processType = 'word2vec'
-#  processType = 'vectorize-idf'
-#  processType = 'tf-idf'
-# ----------------------------------------------------------------------
-
-
-# ----------------------------> 包及环境启动
 import pandas as pd
 import pyspark.ml.feature
 from pyspark.ml import Pipeline
@@ -20,11 +12,8 @@ from pyspark.sql import SparkSession,Row
 from pyspark.sql.types import StringType
 from pyspark.sql.functions import udf, col
 
-spark = SparkSession.builder.appName('text_classification').getOrCreate()
-# ----------------------------------------------------------------------
-
-
 # ----------------------------> 数据读取
+spark = SparkSession.builder.appName('text_classification').getOrCreate()
 try:
     df = spark.read.csv('../data/IMDB.csv', header = True, inferSchema = True)
 except:
@@ -90,15 +79,11 @@ tokenizer = Tokenizer(inputCol='clean_text', outputCol='tokens')
 add_stopwords = ["<br />","amp"]
 stopwords_remover = StopWordsRemover(inputCol='tokens', outputCol='filtered_tokens').setStopWords(add_stopwords)
 vectorizer = CountVectorizer(inputCol='filtered_tokens', outputCol='rawFeatures')
-hashingTF = HashingTF(inputCol="filtered_tokens", outputCol="rawFeatures")
+# or use hashingTF = HashingTF(inputCol="tokens", outputCol="rawFeatures")
 idf = IDF(inputCol='rawFeatures', outputCol='vectorizedFeatures')
 word2Vec = Word2Vec(vectorSize=50, minCount=2, inputCol="filtered_tokens", outputCol="vectorizedFeatures")
-if processType == 'word2vec':
-    pipeline = Pipeline(stages=[tokenizer,stopwords_remover,word2Vec])
-if processType == 'vectorize-idf':
-    pipeline = Pipeline(stages=[tokenizer,stopwords_remover,vectorizer,idf])
-if processType == 'tf-idf':
-    pipeline = Pipeline(stages=[tokenizer,stopwords_remover,hashingTF,idf])
+#  pipeline = Pipeline(stages=[tokenizer,stopwords_remover,vectorizer,idf])
+pipeline = Pipeline(stages=[tokenizer,stopwords_remover,word2Vec])
 preprocessModel = pipeline.fit(trainDF)
 trainDF = preprocessModel.transform(trainDF)
 testDF = preprocessModel.transform(testDF)
@@ -108,11 +93,11 @@ testDF = preprocessModel.transform(testDF)
 # ----------------------------> 训练
 lr = LogisticRegression(featuresCol='vectorizedFeatures',labelCol='label')
 lr_model = lr.fit(trainDF)
-prediction = lr_model.transform(testDF)
-prediction.select(['label', 'prediction']).show()
+predictions = lr_model.transform(testDF)
+predictions.select(['label', 'prediction']).show()
 evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
-accuracy = evaluator.evaluate(prediction)
-print(accuracy)
+accuracy = evaluator.evaluate(predictions)
+accuracy
 # precision recall .... here 
 # ----------------------------------------------------------------------
 
@@ -126,46 +111,6 @@ inputText = preprocessModel.transform(inputText)
 inputPrediction = lr_model.transform(inputText)
 inputPrediction.show()
 inputPrediction.select(['clean_text', 'prediction']).show()
-# ----------------------------------------------------------------------
-
-
-# ----------------------------> 模型比较
-def logisticCV(trainDF, testDF):
-    lr = LogisticRegression(featuresCol='vectorizedFeatures',labelCol='label')
-    model = lr.fit(trainDF)
-    prediction = model.transform(testDF)
-    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
-    accuracy = evaluator.evaluate(prediction)
-    print('Accuracy of logistic regression: %g' % accuracy)
-
-def RandomForest(trainDF, testDF):
-    rf = RandomForestClassifier(featuresCol='vectorizedFeatures',labelCol='label')
-    model = rf.fit(trainDF)
-    prdiction = model.transform(testDF)
-    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
-    accuracy = evaluator.evaluate(prediction)
-    print('Accuracy of random forest: %g' % accuracy)
-
-def NaiveBayes(trainDF, testDF):
-    nb = NaiveBayes(featuresCol='vectorizedFeatures',labelCol='label')
-    model = nb.fit(trainDF)
-    prdiction = model.transform(testDF)
-    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
-    accuracy = evaluator.evaluate(prediction)
-    print('Accuracy of naive bayes: %g' % accuracy)
-    
-def GBTClassifier(trainDF, testDF):
-    gbt = GBTClassifier(featuresCol='vectorizedFeatures',labelCol='label')
-    model = gbt.fit(trainDF)
-    prdiction = model.transform(testDF)
-    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
-    accuracy = evaluator.evaluate(prediction)
-    print('Accuracy of gbt: %g' % accuracy)
-
-logisticCV(trainDF, testDF)
-RandomForest(trainDF, testDF)
-NaiveBayes(trainDF, testDF)
-GBTClassifier(trainDF, testDF)
 # ----------------------------------------------------------------------
 
 
@@ -185,9 +130,12 @@ def logisticCV(trainDF, testDF):
                                     numFolds=5)
     cv = crossValidator.fit(trainDF)
     best_model = cv.bestModel.stages[0]
-    prediction = best_model.transform(testDF)
-    accuracy = evaluator.evaluate(prediction)
+    predictions = best_model.transform(testDF)
+    accuracy = evaluator.evaluate(predictions)
     print('Accuracy in Cross Validation of logistic regression: %g' % accuracy)
+
+logisticCV(trainDF, testDF)
+
 
 def RandomForestCV(trainDF, testDF):
     rf = RandomForestClassifier(featuresCol='vectorizedFeatures',labelCol='label')
@@ -206,13 +154,11 @@ def RandomForestCV(trainDF, testDF):
                                     numFolds=5)
     cv = crossValidator.fit(trainDF)
     best_model = cv.bestModel.stages[0]
-    prediction = best_model.transform(testDF)
-    accuracy = evaluator.evaluate(prediction)
+    predictions = best_model.transform(testDF)
+    accuracy = evaluator.evaluate(predictions)
     print('Accuracy in Cross Validation of random forest: %g' % accuracy)
 
-logisticCV(trainDF, testDF)
 RandomForestCV(trainDF, testDF)
-# ----------------------------------------------------------------------
 
 
 
