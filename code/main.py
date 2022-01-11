@@ -8,14 +8,20 @@ processType = 'word2vec'
 # ----------------------------------------------------------------------
 
 
+# ----------------------------> 文本清洁选项
+cleaning = False
+#  cleaning = True # 需要上传第三方包 gensim
+# ----------------------------------------------------------------------
+
+
 # ----------------------------> 包及环境启动
 import pandas as pd
 import pyspark.ml.feature
 from pyspark.ml import Pipeline
 from pyspark.ml.tuning import CrossValidator,ParamGridBuilder
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
-from pyspark.ml.feature import Tokenizer,StopWordsRemover,CountVectorizer,IDF,StringIndexer,Word2Vec
-from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
+from pyspark.ml.feature import Tokenizer,StopWordsRemover,CountVectorizer,IDF,StringIndexer,Word2Vec,HashingTF
+from pyspark.ml.classification import LogisticRegression, RandomForestClassifier, NaiveBayes, GBTClassifier
 from pyspark.sql import SparkSession,Row
 from pyspark.sql.types import StringType
 from pyspark.sql.functions import udf, col
@@ -45,31 +51,34 @@ df.groupBy('sentiment').count().show()
 
 
 # ----------------------------> 文本清洁
-try:
-    # 在服务器上的分布式模式中，需要使用 --py-files 将 gensim 包传到每个子节点
-    # 若该过程失败则跳过文本清洁过程
-    import gensim.parsing.preprocessing as gsp
-    from gensim import utils
-    filters = [
-        gsp.strip_tags,
-        gsp.strip_punctuation,
-        gsp.strip_multiple_whitespaces,
-        gsp.strip_numeric,
-        gsp.remove_stopwords,
-        gsp.strip_short,
-        gsp.stem_text
-    ]
-    def clean_text(x):
-        x = x.lower()
-        x = utils.to_unicode(x)
-        for f in filters:
-            x = f(x)
-        return x
-
-    cleanTextUDF = udf(lambda x: clean_text(x), StringType())
-    df = df.withColumn("clean_text", cleanTextUDF(col("review")))
-except:
+if cleaning == False:
     df = df.withColumn("clean_text", df.review)
+else:
+    try:
+        # 在服务器上的分布式模式中，需要使用 --py-files 将 gensim 包传到每个子节点
+        # 若该过程失败则跳过文本清洁过程
+        import gensim.parsing.preprocessing as gsp
+        from gensim import utils
+        filters = [
+            gsp.strip_tags,
+            gsp.strip_punctuation,
+            gsp.strip_multiple_whitespaces,
+            gsp.strip_numeric,
+            gsp.remove_stopwords,
+            gsp.strip_short,
+            gsp.stem_text
+        ]
+        def clean_text(x):
+            x = x.lower()
+            x = utils.to_unicode(x)
+            for f in filters:
+                x = f(x)
+            return x
+
+        cleanTextUDF = udf(lambda x: clean_text(x), StringType())
+        df = df.withColumn("clean_text", cleanTextUDF(col("review")))
+    except:
+        df = df.withColumn("clean_text", df.review)
 # ----------------------------------------------------------------------
 
 
@@ -92,7 +101,7 @@ stopwords_remover = StopWordsRemover(inputCol='tokens', outputCol='filtered_toke
 vectorizer = CountVectorizer(inputCol='filtered_tokens', outputCol='rawFeatures')
 hashingTF = HashingTF(inputCol="filtered_tokens", outputCol="rawFeatures")
 idf = IDF(inputCol='rawFeatures', outputCol='vectorizedFeatures')
-word2Vec = Word2Vec(vectorSize=50, minCount=2, inputCol="filtered_tokens", outputCol="vectorizedFeatures")
+word2Vec = Word2Vec(vectorSize=30, minCount=2, inputCol="filtered_tokens", outputCol="vectorizedFeatures")
 if processType == 'word2vec':
     pipeline = Pipeline(stages=[tokenizer,stopwords_remover,word2Vec])
 if processType == 'vectorize-idf':
@@ -146,15 +155,7 @@ def RandomForest(trainDF, testDF):
     accuracy = evaluator.evaluate(prediction)
     print('Accuracy of random forest: %g' % accuracy)
 
-def NaiveBayes(trainDF, testDF):
-    nb = NaiveBayes(featuresCol='vectorizedFeatures',labelCol='label')
-    model = nb.fit(trainDF)
-    prdiction = model.transform(testDF)
-    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
-    accuracy = evaluator.evaluate(prediction)
-    print('Accuracy of naive bayes: %g' % accuracy)
-    
-def GBTClassifier(trainDF, testDF):
+def GBT(trainDF, testDF):
     gbt = GBTClassifier(featuresCol='vectorizedFeatures',labelCol='label')
     model = gbt.fit(trainDF)
     prdiction = model.transform(testDF)
@@ -162,10 +163,18 @@ def GBTClassifier(trainDF, testDF):
     accuracy = evaluator.evaluate(prediction)
     print('Accuracy of gbt: %g' % accuracy)
 
+def DecisionTree(trainDF, testDF):
+    dt = DecisionTreeClassifier(featuresCol='vectorizedFeatures',labelCol='label')
+    model = dt.fit(trainDF)
+    prdiction = model.transform(testDF)
+    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
+    accuracy = evaluator.evaluate(prediction)
+    print('Accuracy of decision tree: %g' % accuracy)
+
 logisticCV(trainDF, testDF)
 RandomForest(trainDF, testDF)
-NaiveBayes(trainDF, testDF)
-GBTClassifier(trainDF, testDF)
+GBT(trainDF, testDF)
+DecisionTree(trainDF, testDF)
 # ----------------------------------------------------------------------
 
 
@@ -174,9 +183,9 @@ def logisticCV(trainDF, testDF):
     lr = LogisticRegression(featuresCol='vectorizedFeatures',labelCol='label')
     pipeline = Pipeline(stages=[lr])
     paramGrid = ParamGridBuilder() \
-        .addGrid(lr.regParam, [0.01, 0.5, 2.0]) \
+        .addGrid(lr.regParam, [0, 0.5, 2.0]) \
         .addGrid(lr.elasticNetParam, [0.0, 0.5, 1.0]) \
-        .addGrid(lr.maxIter, [1, 5, 10]) \
+        .addGrid(lr.maxIter, [50, 100, 200]) \
         .build() 
     evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
     crossValidator = CrossValidator(estimator=pipeline, 
@@ -194,8 +203,8 @@ def RandomForestCV(trainDF, testDF):
     pipeline = Pipeline(stages=[rf])
     paramGrid = ParamGridBuilder() \
         .addGrid(rf.maxDepth, [5, 10]) \
-        .addGrid(rf.maxBins, [25, 31]) \
-        .addGrid(rf.minInfoGain, [0.01, 0.001]) \
+        .addGrid(rf.maxBins, [16, 32]) \
+        .addGrid(rf.minInfoGain, [0, 0.01]) \
         .addGrid(rf.numTrees, [20, 60]) \
         .addGrid(rf.impurity, ['gini', 'entropy']) \
         .build() 
@@ -210,8 +219,30 @@ def RandomForestCV(trainDF, testDF):
     accuracy = evaluator.evaluate(prediction)
     print('Accuracy in Cross Validation of random forest: %g' % accuracy)
 
+def GBTClassifierCV(trainDF, testDF):
+    gbt = GBTClassifier(featuresCol='vectorizedFeatures',labelCol='label')
+    pipeline = Pipeline(stages=[gbt])
+    paramGrid = ParamGridBuilder() \
+        .addGrid(rf.maxDepth, [5, 10]) \
+        .addGrid(rf.maxBins, [16, 32]) \
+        .addGrid(rf.minInfoGain, [0, 0.01]) \
+        .addGrid(rf.numTrees, [20, 60]) \
+        .addGrid(rf.impurity, ['gini', 'entropy']) \
+        .build() 
+    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
+    crossValidator = CrossValidator(estimator=pipeline, 
+                                    evaluator=evaluator,
+                                    estimatorParamMaps=paramGrid,
+                                    numFolds=5)
+    cv = crossValidator.fit(trainDF)
+    best_model = cv.bestModel.stages[0]
+    prediction = best_model.transform(testDF)
+    accuracy = evaluator.evaluate(prediction)
+    print('Accuracy in Cross Validation of GBT: %g' % accuracy)
+
 logisticCV(trainDF, testDF)
 RandomForestCV(trainDF, testDF)
+GBTClassifierCV(trainDF, testDF)
 # ----------------------------------------------------------------------
 
 
