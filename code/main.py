@@ -21,7 +21,7 @@ from pyspark.ml import Pipeline
 from pyspark.ml.tuning import CrossValidator,ParamGridBuilder
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 from pyspark.ml.feature import Tokenizer,StopWordsRemover,CountVectorizer,IDF,StringIndexer,Word2Vec,HashingTF
-from pyspark.ml.classification import LogisticRegression, RandomForestClassifier, NaiveBayes, GBTClassifier
+from pyspark.ml.classification import LogisticRegression,RandomForestClassifier,GBTClassifier,DecisionTreeClassifier
 from pyspark.sql import SparkSession,Row
 from pyspark.sql.types import StringType
 from pyspark.sql.functions import udf, col
@@ -223,11 +223,11 @@ def GBTClassifierCV(trainDF, testDF):
     gbt = GBTClassifier(featuresCol='vectorizedFeatures',labelCol='label')
     pipeline = Pipeline(stages=[gbt])
     paramGrid = ParamGridBuilder() \
-        .addGrid(rf.maxDepth, [5, 10]) \
-        .addGrid(rf.maxBins, [16, 32]) \
-        .addGrid(rf.minInfoGain, [0, 0.01]) \
-        .addGrid(rf.numTrees, [20, 60]) \
-        .addGrid(rf.impurity, ['gini', 'entropy']) \
+        .addGrid(gbt.maxDepth, [5, 10]) \
+        .addGrid(gbt.maxBins, [16, 32]) \
+        .addGrid(gbt.minInfoGain, [0, 0.01]) \
+        .addGrid(gbt.maxIter, [10, 20]) \
+        .addGrid(gbt.stepSize, [0.1, 0.2]) \
         .build() 
     evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
     crossValidator = CrossValidator(estimator=pipeline, 
