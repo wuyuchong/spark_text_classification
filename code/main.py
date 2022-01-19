@@ -240,8 +240,30 @@ def GBTClassifierCV(trainDF, testDF):
     accuracy = evaluator.evaluate(prediction)
     print('Accuracy in Cross Validation of GBT: %g' % accuracy)
 
+def DecisionTreeCV(trainDF, testDF):
+    dt = DecisionTreeClassifier(featuresCol='vectorizedFeatures',labelCol='label')
+    pipeline = Pipeline(stages=[dt])
+    paramGrid = ParamGridBuilder() \
+        .addGrid(dt.maxDepth, [5, 10]) \
+        .addGrid(dt.maxBins, [16, 32]) \
+        .addGrid(dt.minInfoGain, [0, 0.01]) \
+        .addGrid(dt.minWeightFractionPerNode, [0, 0.5]) \
+        .addGrid(dt.impurity, ['gini', 'entropy']) \
+        .build() 
+    evaluator = MulticlassClassificationEvaluator(labelCol='label',predictionCol='prediction',metricName='accuracy')
+    crossValidator = CrossValidator(estimator=pipeline, 
+                                    evaluator=evaluator,
+                                    estimatorParamMaps=paramGrid,
+                                    numFolds=5)
+    cv = crossValidator.fit(trainDF)
+    best_model = cv.bestModel.stages[0]
+    prediction = best_model.transform(testDF)
+    accuracy = evaluator.evaluate(prediction)
+    print('Accuracy in Cross Validation of GBT: %g' % accuracy)
+
 logisticCV(trainDF, testDF)
 RandomForestCV(trainDF, testDF)
+GBTClassifierCV(trainDF, testDF)
 GBTClassifierCV(trainDF, testDF)
 # ----------------------------------------------------------------------
 
