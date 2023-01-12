@@ -9,7 +9,7 @@ processType = 'word2vec'
 
 
 # ----------------------------> 文本清洁选项
-cleaning = False
+cleaning = True
 #  cleaning = True # 需要上传第三方包 gensim
 # ----------------------------------------------------------------------
 
@@ -267,7 +267,3 @@ GBTClassifierCV(trainDF, testDF)
 GBTClassifierCV(trainDF, testDF)
 # ----------------------------------------------------------------------
 
-
-
-
-# https://spark.apache.org/docs/latest/api/python/user_guide/python_packaging.html
